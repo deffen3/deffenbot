@@ -37,6 +37,9 @@ class MyBot(BaseAgent):
         self.front_flip_timeout = 1.5 #seconds
         self.front_flip_last_timer = 0.0
 
+        self.single_jump_timeout = 2.0
+        self.single_jump_last_timer = 0.0
+
         self.back_to_goal_dist_hyst = 0.0
 
         self.target_strategy = None
@@ -105,7 +108,6 @@ class MyBot(BaseAgent):
         self.target_strategy = TargetStrategyState.GoForBall
 
         # Alternate Target Selections:
-
         if self.kickoff_mode_enabled is False:
 
             # Check if available boost is nearby to grab
@@ -138,8 +140,19 @@ class MyBot(BaseAgent):
                 self.target_strategy = TargetStrategyState.GoBackToQuickGoalSide
                 self.back_to_goal_dist_hyst = 0.0
 
-        elif ball_location.y != 0:
-            self.kickoff_mode_enabled = False
+        else:
+            # Strict kick-off boost grad mode
+            target_boost_location = check_for_close_boost_pad(
+                my_car, car_location, 
+                500.0, 0.3,
+                self.boost_pad_tracker)
+            if target_boost_location is not None:
+                target_location = target_boost_location
+                self.target_strategy = TargetStrategyState.GoForBoost
+
+            # Detect kick-off first touch
+            if ball_location.y != 0:
+                self.kickoff_mode_enabled = False
 
 
         # Control to Target
@@ -156,30 +169,39 @@ class MyBot(BaseAgent):
 
         if self.front_flip_last_timer > 0.0:
             self.front_flip_last_timer -= dt
+        if self.single_jump_last_timer > 0.0:
+            self.single_jump_last_timer -= dt
 
 
         ball_prediction = self.get_ball_prediction_struct()  # This can predict bounces, etc
-        ball_in_future = find_slice_at_time(ball_prediction, packet.game_info.seconds_elapsed + 2)
+        ball_in_future = find_slice_at_time(ball_prediction, packet.game_info.seconds_elapsed + 1)
 
 
-        if car_velocity.length() <= 1500.0 and target_angle > 0.4:
+        if car_velocity.length() <= 1500.0 and abs(target_angle) > 0.4:
             controls.handbrake = True
+
+            controls.throttle = 0.33
 
 
         if car_velocity.length() <= 2500.0:
             if self.front_flip_last_timer <= 0.0 and abs(target_angle) <= 0.2:
                 controls.boost = True
             
-            if car_velocity.length() >= 1300.0 and target_distance >= 3000 and abs(target_angle) <= 0.2:
+            if car_velocity.length() >= 1300.0 and target_distance >= 3000 and abs(target_angle) <= 0.2 and my_car.has_wheel_contact:
                 if self.front_flip_last_timer <= 0.0:
                     self.front_flip_last_timer = self.front_flip_timeout
                     return self.begin_sequence(packet, create_front_flip_sequence())
 
-            # ball_in_future might be None if we don't have an adequate ball prediction right now, like during
-            # replays, so check it to avoid errors.
-            if self.target_strategy is TargetStrategyState.GoForBall and ball_in_future is not None:
-                target_location = Vec3(ball_in_future.physics.location)
-                self.renderer.draw_line_3d(ball_location, target_location, self.renderer.cyan())
+
+        # ball_in_future might be None if we don't have an adequate ball prediction right now, like during
+        # replays, so check it to avoid errors.
+        if self.target_strategy is TargetStrategyState.GoForBall and ball_in_future is not None:
+            target_location = Vec3(ball_in_future.physics.location)
+            self.renderer.draw_line_3d(ball_location, target_location, self.renderer.cyan())
+
+            if target_location.z >= 10.0 and self.single_jump_last_timer <= 0.0 and target_distance < 100.0:
+                controls.jump = True
+                self.single_jump_last_timer = self.single_jump_timeout
         
 
 
