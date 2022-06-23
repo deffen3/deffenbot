@@ -39,5 +39,8 @@ class BoostPadTracker:
             our_pad.is_active = packet_pad.is_active
             our_pad.timer = packet_pad.timer
 
+    def get_boost_pads(self) -> List[BoostPad]:
+        return self.boost_pads
+
     def get_full_boosts(self) -> List[BoostPad]:
         return self._full_boosts_only
